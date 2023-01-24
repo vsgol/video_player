@@ -19,13 +19,21 @@ class EmptyStudentVideo:
     def release(self):
         pass
 
+    def using_ide(self):
+        pass
+
+    def googling(self):
+        pass
+
     def cheating(self):
         pass
 
 
 class StudentVideo:
     def __init__(self, path, student_name):
-        self.is_cheating = False
+        self.start_cheating = -1
+        self.start_google = -1
+        self.start_ide = -1
         self.output = open(join(path, student_name, 'cheating_frames.txt'), 'a')
         self.student_name = student_name
         self.webcam_capture = cv2.VideoCapture(join(path, student_name, 'webcam.webm'))
@@ -39,30 +47,59 @@ class StudentVideo:
         ret_webcam, image_webcam = self.webcam_capture.read()
         ret_window, image_window = self.window_capture.read()
         self.frame += 1
+        if not ret_window and not ret_webcam:
+            return False, None
+
         if not ret_window:
-            return ret_webcam, image_webcam
-        if not ret_webcam:
-            return True, image_window
-        image_webcam = cv2.resize(image_webcam, shape)
-        image_window = cv2.resize(image_window, (shape[0] // 4, shape[1] // 4))
-        image_webcam[-shape[1] // 4:, -shape[0] // 4:] = image_window
-        if self.is_cheating:
-            image_webcam[[0, 1, -2, -1], :] = [0, 0, 255]
-            image_webcam[:, [0, 1, -2, -1]] = [0, 0, 255]
-        return True, image_webcam
+            image = cv2.resize(image_webcam, shape)
+        elif not ret_webcam:
+            image = cv2.resize(image_window, shape)
+        else:
+            image = cv2.resize(image_webcam, shape)
+            image_window = cv2.resize(image_window, (shape[0] // 4, shape[1] // 4))
+            image[-shape[1] // 4:, -shape[0] // 4:] = image_window
+        if self.start_cheating != -1:
+            image[[0, 1, 2, 3, -4, -3, -2, -1], :] = [0, 0, 255]
+            image[:, [0, 1, 2, 3, -4, -3, -2, -1]] = [0, 0, 255]
+        if self.start_google != -1:
+            image[[0, 1, -2, -1], :] = [255, 0, 0]
+            image[:, [0, 1, -2, -1]] = [255, 0, 0]
+        elif self.start_ide != -1:
+            image[[0, 1, -2, -1], :] = [0, 255, 0]
+            image[:, [0, 1, -2, -1]] = [0, 255, 0]
+
+        return True, image
 
     def release(self):
         self.webcam_capture.release()
         self.window_capture.release()
-        if self.is_cheating:
+        if self.start_cheating != -1:
             self.cheating()
 
-    def cheating(self):
-        if self.is_cheating:
-            self.output.write(f' - {self.frame}\n')
+    def using_ide(self):
+        if self.start_google != -1:
+            self.googling()
+        if self.start_ide != -1:
+            self.output.write(f'{self.start_ide} - {self.frame}  # using ide\n')
+            self.start_ide = -1
         else:
-            self.output.write(self.frame.__str__())
-        self.is_cheating = not self.is_cheating
+            self.start_ide = self.frame
+
+    def googling(self):
+        if self.start_ide != -1:
+            self.using_ide()
+        if self.start_google != -1:
+            self.output.write(f'{self.start_google} - {self.frame}  # googling\n')
+            self.start_google = -1
+        else:
+            self.start_google = self.frame
+
+    def cheating(self):
+        if self.start_cheating != -1:
+            self.output.write(f'{self.start_cheating} - {self.frame}  # cheating\n')
+            self.start_cheating = -1
+        else:
+            self.start_cheating = self.frame
 
 
 def build_argparser():
@@ -82,6 +119,7 @@ def main():
     shape = 1920 // split_size, 1080 // split_size
     default_fps = 30.0
     fps = default_fps
+    pause = False
     selected_window = -1
     video_path = args.input_path
     last_student = 0
@@ -89,7 +127,7 @@ def main():
     students = [[EmptyStudentVideo()] * split_size for _ in range(split_size)]
     while True:
         start_time = perf_counter()
-        if fps > 0:
+        if fps > 0 and not pause:
             image = []
             for i in range(split_size):
                 image.append([])
@@ -102,7 +140,7 @@ def main():
                             last_student += 1
                             ret, small_window_image = students[i][j].get_image(shape)
                         else:
-                            ret, small_window_image = True, np.zeros(shape)
+                            ret, small_window_image = True, np.zeros((shape[1], shape[0], 3))
                     image[i].append(small_window_image)
             image = np.vstack([np.hstack(row) for row in image])
 
@@ -115,26 +153,37 @@ def main():
 
         # Quit
         if key in {ord('q'), ord('Q'), 27}:
+            [[student.release() for student in row] for row in students]
             break
         # Swap images
         elif key in {ord('s'), ord('S')}:
             if selected_window != -1:
                 students[selected_window // split_size][selected_window % split_size].swap_images()
                 selected_window = -1
-        elif key in {ord('c'), ord('c')}:
+        elif key in {ord('c'), ord('C')}:
             if selected_window != -1:
                 students[selected_window // split_size][selected_window % split_size].cheating()
+                selected_window = -1
+        elif key in {ord('g'), ord('G')}:
+            if selected_window != -1:
+                students[selected_window // split_size][selected_window % split_size].googling()
+                selected_window = -1
+        elif key in {ord('i'), ord('I')}:
+            if selected_window != -1:
+                students[selected_window // split_size][selected_window % split_size].using_ide()
                 selected_window = -1
         elif ord('1') <= key <= ord(args.number_of_videos):
             selected_window = key - ord('1')
         elif key == ord('+'):
             fps += 0.25 * default_fps
-            fps = min(default_fps * 3, fps)
+            fps = min(default_fps * 5, fps)
         elif key == ord('-'):
             fps -= 0.25 * default_fps
             fps = max(0.0, fps)
         elif key == ord('='):
             fps = default_fps
+        elif key == ord(' '):
+            pause = not pause
     cv2.destroyWindow('Student videos')
 
 
