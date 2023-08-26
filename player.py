@@ -1,3 +1,4 @@
+import json
 from argparse import ArgumentParser
 from time import perf_counter
 from os import listdir
@@ -13,110 +14,101 @@ class EmptyStudentVideo:
         pass
 
     @staticmethod
-    def get_image(shape):
+    def get_image(_):
         return False, None
 
     def release(self):
         pass
 
-    def using_ide(self):
-        pass
-
-    def googling(self):
-        pass
-
     def cheating(self):
+        pass
+
+    def fast_forward(self):
+        pass
+
+    def rewind(self):
         pass
 
 
 class StudentVideo:
     def __init__(self, path, student_name):
+        self.path = path
         self.start_cheating = -1
         self.start_google = -1
         self.start_ide = -1
-        self.output = open(join(path, student_name, 'cheating_frames.txt'), 'a')
+        self.res = []
         self.student_name = student_name
-        self.webcam_capture = cv2.VideoCapture(join(path, student_name, 'webcam.webm'))
-        self.window_capture = cv2.VideoCapture(join(path, student_name, 'window.webm'))
+        self.main_capture = cv2.VideoCapture(join(path, student_name, 'webcam.mp4'))
+        self.second_capture = cv2.VideoCapture(join(path, student_name, 'window.mp4'))
         self.frame = 0
 
     def swap_images(self):
-        self.webcam_capture, self.window_capture = self.window_capture, self.webcam_capture
+        self.main_capture, self.second_capture = self.second_capture, self.main_capture
 
     def get_image(self, shape):
-        ret_webcam, image_webcam = self.webcam_capture.read()
-        ret_window, image_window = self.window_capture.read()
+        ret_main, image_main = self.main_capture.read()
+        ret_second, image_second = self.second_capture.read()
         self.frame += 1
-        if not ret_window and not ret_webcam:
+        if not ret_second and not ret_main:
             return False, None
 
-        if not ret_window:
-            image = cv2.resize(image_webcam, shape)
-        elif not ret_webcam:
-            image = cv2.resize(image_window, shape)
+        if not ret_second:
+            image = cv2.resize(image_main, shape)
+        elif not ret_main:
+            image = cv2.resize(image_second, shape)
         else:
-            image = cv2.resize(image_webcam, shape)
-            image_window = cv2.resize(image_window, (shape[0] // 4, shape[1] // 4))
-            image[-shape[1] // 4:, -shape[0] // 4:] = image_window
+            image = cv2.resize(image_main, shape)
+            image_second = cv2.resize(image_second, (shape[0] // 4, shape[1] // 4))
+            image[-shape[1] // 4:, -shape[0] // 4:] = image_second
         if self.start_cheating != -1:
             image[[0, 1, 2, 3, -4, -3, -2, -1], :] = [0, 0, 255]
             image[:, [0, 1, 2, 3, -4, -3, -2, -1]] = [0, 0, 255]
-        if self.start_google != -1:
-            image[[0, 1, -2, -1], :] = [255, 0, 0]
-            image[:, [0, 1, -2, -1]] = [255, 0, 0]
-        elif self.start_ide != -1:
-            image[[0, 1, -2, -1], :] = [0, 255, 0]
-            image[:, [0, 1, -2, -1]] = [0, 255, 0]
+        # if self.start_google != -1:
+        #     image[[0, 1, -2, -1], :] = [255, 0, 0]
+        #     image[:, [0, 1, -2, -1]] = [255, 0, 0]
+        # elif self.start_ide != -1:
+        #     image[[0, 1, -2, -1], :] = [0, 255, 0]
+        #     image[:, [0, 1, -2, -1]] = [0, 255, 0]
 
         return True, image
 
     def release(self):
-        self.webcam_capture.release()
-        self.window_capture.release()
+        self.main_capture.release()
+        self.second_capture.release()
         if self.start_cheating != -1:
             self.cheating()
-
-    def using_ide(self):
-        if self.start_google != -1:
-            self.googling()
-        if self.start_ide != -1:
-            self.output.write(f'{self.start_ide} - {self.frame}  # using ide\n')
-            self.start_ide = -1
-        else:
-            self.start_ide = self.frame
-
-    def googling(self):
-        if self.start_ide != -1:
-            self.using_ide()
-        if self.start_google != -1:
-            self.output.write(f'{self.start_google} - {self.frame}  # googling\n')
-            self.start_google = -1
-        else:
-            self.start_google = self.frame
+        with open(join(self.path, f"{self.student_name}.json"), 'w') as outfile:
+            json.dump({"result": [{"frame_data": self.res}]}, outfile)
 
     def cheating(self):
         if self.start_cheating != -1:
-            self.output.write(f'{self.start_cheating} - {self.frame}  # cheating\n')
+            self.res.append({
+                "start_time": self.start_cheating/30.0,
+                "end_time": self.frame/30.0,
+                "warn": ["cheating"]
+                })
             self.start_cheating = -1
         else:
             self.start_cheating = self.frame
 
+    def fast_forward(self):
+        index = max(self.main_capture.get(cv2.CAP_PROP_POS_FRAMES),
+                    self.second_capture.get(cv2.CAP_PROP_POS_FRAMES))
+        index += 300
+        self.main_capture.set(cv2.CAP_PROP_POS_FRAMES, min(index, self.main_capture.get(cv2.CAP_PROP_FRAME_COUNT)))
+        self.second_capture.set(cv2.CAP_PROP_POS_FRAMES, min(index, self.second_capture.get(cv2.CAP_PROP_FRAME_COUNT)))
 
-def build_argparser():
-    parser = ArgumentParser()
-    parser.add_argument('input_path', help='Required. An input to process. The input must be a folder with video')
-    parser.add_argument('number_of_videos', help='Number of videos that will be shown on the screen at the same time '
-                                                 '(from 1 to 9)')
-    return parser
+    def rewind(self):
+        index = max(self.main_capture.get(cv2.CAP_PROP_POS_FRAMES),
+                    self.second_capture.get(cv2.CAP_PROP_POS_FRAMES))
+        index -= 300
+        self.main_capture.set(cv2.CAP_PROP_POS_FRAMES, max(index, 0))
+        self.second_capture.set(cv2.CAP_PROP_POS_FRAMES, max(index, 0))
 
 
-def main():
-    print('Controls')
-    print('Space: Play/pause, +: Faster, -: Slower, =: Normal rate, number+s: Swap images of `number` student' +
-          'number+c: Student `number` began/finished cheating')
-    args = build_argparser().parse_args()
+def player(args):
     split_size = math.ceil(math.sqrt(int(args.number_of_videos)))
-    shape = 1920 // split_size, 1080 // split_size
+    shape = 1720 // split_size, 880 // split_size
     default_fps = 30.0
     fps = default_fps
     pause = False
@@ -160,20 +152,25 @@ def main():
             if selected_window != -1:
                 students[selected_window // split_size][selected_window % split_size].swap_images()
                 selected_window = -1
+        # Cheating
         elif key in {ord('c'), ord('C')}:
             if selected_window != -1:
                 students[selected_window // split_size][selected_window % split_size].cheating()
                 selected_window = -1
-        elif key in {ord('g'), ord('G')}:
+
+        # fast_forward and rewind
+        elif key in {ord('l'), ord('L')}:
             if selected_window != -1:
-                students[selected_window // split_size][selected_window % split_size].googling()
-                selected_window = -1
-        elif key in {ord('i'), ord('I')}:
+                students[selected_window // split_size][selected_window % split_size].fast_forward()
+        elif key in {ord('j'), ord('J')}:
             if selected_window != -1:
-                students[selected_window // split_size][selected_window % split_size].using_ide()
-                selected_window = -1
+                students[selected_window // split_size][selected_window % split_size].rewind()
+
+        # select video
         elif ord('1') <= key <= ord(args.number_of_videos):
             selected_window = key - ord('1')
+
+        # fps
         elif key == ord('+'):
             fps += 0.25 * default_fps
             fps = min(default_fps * 5, fps)
@@ -182,10 +179,26 @@ def main():
             fps = max(0.0, fps)
         elif key == ord('='):
             fps = default_fps
-        elif key == ord(' '):
+        elif key == ord(' ') or key == ord('k') or key == ord('K'):
             pause = not pause
+
     cv2.destroyWindow('Student videos')
 
 
+def build_argparser():
+    parser = ArgumentParser()
+    parser.add_argument('input_path', help='Required. An input to process. The input must be a folder with video')
+    parser.add_argument('number_of_videos', help='Number of videos that will be shown on the screen at the same time '
+                                                 '(from 1 to 9)')
+    return parser
+
+
 if __name__ == '__main__':
-    main()
+    print('''
+Controls
+  Space/K: Play/pause, +: Faster, -: Slower, =: Normal rate, 
+  J: rewind 10 seconds, L: fast forward 10 seconds, 
+  `number`+S: Swap images of `number` student, 
+  `number`+C: Student `number` began/finished cheating'''.lstrip())
+    args = build_argparser().parse_args()
+    player(args)
